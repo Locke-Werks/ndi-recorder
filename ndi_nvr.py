@@ -685,24 +685,33 @@ def cmd_start(args):
 
     handle = open(root / LOG_FILE, "a", encoding="utf-8")
     detached = subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP
-    # Terminals and task runners often put their children in a job object that
-    # kills everything when the parent goes. Breaking out of it is what makes this
-    # survive the shell that launched it. Not every job allows it, hence the retry.
+    # Terminals and task runners often put their children in a job object that kills
+    # everything when the parent goes. Breaking out of it is what makes this outlive
+    # the shell that launched it. Not every job permits it, and a daemon that quietly
+    # dies with the window is worse than one that says it is going to.
+    broke_away = False
     for flags in (detached | subprocess.CREATE_BREAKAWAY_FROM_JOB, detached):
         try:
             subprocess.Popen(
                 child, stdin=subprocess.DEVNULL, stdout=handle, stderr=subprocess.STDOUT,
                 creationflags=flags, close_fds=True,
             )
+            broke_away = flags != detached
             break
-        except OSError:
-            continue
+        except OSError as exc:
+            if flags == detached:
+                print(f"Could not start the recorder: {exc}", file=sys.stderr)
+                return 1
 
     for _ in range(40):
         time.sleep(0.5)
         reply = talk(root, {"cmd": "status"})
         if reply:
             print(f"Started. Recording to {root / RING_DIR}, log at {root / LOG_FILE}")
+            if not broke_away:
+                print("Warning: this shell would not let the recorder leave its job "
+                      "object, so it will be killed when this shell exits. Use "
+                      "`autostart on`, or start it from a plain terminal.")
             return 0
     print(f"Daemon did not report ready. Check {root / LOG_FILE}", file=sys.stderr)
     return 1
