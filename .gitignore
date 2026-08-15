@@ -1,0 +1,16 @@
+__pycache__/
+*.pyc
+
+# Recordings and daemon runtime state, in case anyone points a root at the repo.
+ring/
+committed/
+config.json
+nvr-state.json
+.active-config.json
+nvr.log
+*.mkv
+*.mp4
+*.mov
+
+# Release staging
+dist/
