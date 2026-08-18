@@ -1,4 +1,18 @@
-# ndi-recorder
+<div align="center">
+
+<img src="assets/ndi-recorder.ico" width="96" alt="NDI Recorder">
+
+# NDI Recorder
+
+**A 24/7 NDI network video recorder in two Python files. Zero dependencies, no build step.**
+
+[![release](https://img.shields.io/github/v/release/Locke-Werks/ndi-recorder?style=flat-square&color=d6262a)](https://github.com/Locke-Werks/ndi-recorder/releases)
+[![license](https://img.shields.io/badge/license-MIT-d6262a?style=flat-square)](LICENSE)
+![platform](https://img.shields.io/badge/platform-Windows%20%2F%20Python%203.8%2B-d6262a?style=flat-square)
+
+</div>
+
+---
 
 A 24/7 network video recorder in two Python files, zero dependencies, and no build step.
 
