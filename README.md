@@ -69,6 +69,10 @@ uses a ring buffer with an escape hatch.
 The ring holds the last **96 hours**. Anything older is deleted automatically, no
 prompting, no dialog asking whether you are sure.
 
+Pruning only runs while something is actually being recorded. If the source goes
+away, the ring stops shrinking and waits, because deleting history you cannot
+replace is a strange way to react to an outage.
+
 When something happens that you want to keep, `commit` takes the most recent **48 hours**
 out of the ring, moves it into `committed/<timestamp>/` where nothing will ever delete it,
 and then **empties the ring entirely**. The 48 to 96 hour tail is discarded. That erasure

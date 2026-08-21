@@ -40,6 +40,10 @@ CONFIG_FILE = "config.json"
 LOG_FILE = "nvr.log"
 SEGMENT_STAMP = "%Y%m%d-%H%M%S"
 
+# How often to repeat "still nothing out there" while a source is missing. Often
+# enough that a tail shows the daemon is alive, rare enough not to bury the log.
+MISSING_NOTICE_SECONDS = 900
+
 # Ring scanning accepts every container it might have written, so switching
 # containers does not orphan the segments recorded before the change.
 CONTAINERS = {"mkv": ("matroska", ".mkv"), "mp4": ("mp4", ".mp4")}
@@ -77,6 +81,15 @@ def now_stamp():
 
 def log(message):
     print(f"{datetime.now():%Y-%m-%d %H:%M:%S}  {message}", flush=True)
+
+
+def human_duration(seconds):
+    seconds = int(seconds)
+    if seconds < 60:
+        return f"{seconds}s"
+    if seconds < 3600:
+        return f"{seconds // 60}m"
+    return f"{seconds // 3600}h{seconds % 3600 // 60:02d}m"
 
 
 def segment_time(path):
@@ -452,16 +465,30 @@ def commit(root, hours, keep_ring):
 # --- daemon ------------------------------------------------------------------
 
 def find_source(lib, wanted, timeout):
+    """Hands back the source to record and every name discovered, because the
+    caller has to tell an empty network apart from an ambiguous one."""
     sources = discover(lib, timeout)
+    names = [s["name"] for s in sources]
     if not sources:
-        return None
+        return None, names
     if not wanted:
-        return sources[0] if len(sources) == 1 else None
+        return (sources[0] if len(sources) == 1 else None), names
     exact = [s for s in sources if s["name"] == wanted]
     if exact:
-        return exact[0]
+        return exact[0], names
     partial = [s for s in sources if wanted.casefold() in s["name"].casefold()]
-    return partial[0] if len(partial) == 1 else None
+    return (partial[0] if len(partial) == 1 else None), names
+
+
+def describe_absence(wanted, seen):
+    """Why find_source came back empty. "No source" covers both a silent network
+    and several sources with no way to pick one, and the fix differs."""
+    if not seen:
+        return "nothing is broadcasting NDI"
+    listed = ", ".join(seen)
+    if wanted:
+        return f"{wanted!r} does not resolve to one source, visible: {listed}"
+    return f"no source is pinned and {len(seen)} are visible: {listed}"
 
 
 def control_server(root, state, config):
@@ -562,6 +589,14 @@ def run_daemon(root, config):
 
     def housekeeping():
         while not state["stop"].wait(60):
+            # Pruning is tied to recording, not to the clock. An outage used to
+            # cost a segment every five minutes with nothing replacing it, so a
+            # source that wandered off overnight quietly ate the ring it existed
+            # to fill.
+            with state["lock"]:
+                recording = state["connected"]
+            if not recording:
+                continue
             try:
                 prune_ring(root, config["ring_hours"])
             except Exception as exc:
@@ -570,15 +605,32 @@ def run_daemon(root, config):
     threading.Thread(target=housekeeping, daemon=True).start()
 
     lib = load_runtime()
+    missing_since = None
+    last_notice = 0.0
     try:
-        prune_ring(root, config["ring_hours"])
         while not state["stop"].is_set():
-            source = find_source(lib, config["source"], 2.0)
+            source, seen = find_source(lib, config["source"], 2.0)
             if not source:
+                # The one failure that used to log nothing at all, which left an
+                # absent camera looking exactly like a dead daemon.
+                now = time.monotonic()
+                if missing_since is None:
+                    missing_since = last_notice = now
+                    log(f"waiting for a source: "
+                        f"{describe_absence(config['source'], seen)}")
+                elif now - last_notice >= MISSING_NOTICE_SECONDS:
+                    last_notice = now
+                    log(f"still waiting after {human_duration(now - missing_since)}: "
+                        f"{describe_absence(config['source'], seen)}")
                 with state["lock"]:
                     state["last_reason"] = "source_not_found"
                 state["stop"].wait(config["reconnect_delay"])
                 continue
+
+            if missing_since is not None:
+                log(f"source found after "
+                    f"{human_duration(time.monotonic() - missing_since)}")
+                missing_since = None
 
             reason = run_session(lib, source, config, root, state, state["stop"].is_set)
             with state["lock"]:
